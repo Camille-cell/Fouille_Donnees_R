@@ -1,0 +1,343 @@
+---
+title: "<FONT color='#0066CC'><FONT size = 4 ><DIV align= center> AP-4209 ESIEE-Paris: 2024 - 2025</DIV></FONT></FONT>"
+output: 
+  html_document:
+    highlight: textmate
+    theme: readable
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+
+<style type="text/css">
+body, td {font-size: 15px;}
+code.r{font-size: 5px;}
+pre { font-size: 12px;}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+<FONT color='#0066CC'><FONT size = 4 >
+
+::: {align="center"}
+Fouille de données avec R pour la data science et l'intelligence artificielle\
+
+Projet 2 : Analyse factorielle discriminante
+:::
+
+</FONT></FONT>
+
+
+<FONT color='#0066CC'><FONT size = 4 >
+
+::: {align="center"}
+Camille FAHY et Aurélia PESQUET -- ESIEE Paris\
+:::
+
+
+</FONT></FONT>
+
+<hr style="border: 1px  solid gray">
+
+</hr>
+
+<DIV align = justify>
+
+### <FONT color='#0066CC'><FONT size = 4> Objectif du projet </FONT></FONT>
+
+Utiliser l'analyse factorielle discriminante (AFD) pour réduire les dimensions des données des tweets et visualiser le regroupement des sentiments.
+Source des données : jeu de données Twitter Entity Sentiment Analysis (Kaggle).
+
+Lien : https://www.kaggle.com/datasets/jp797498e/twitter-entity-sentiment-analysis
+
+
+
+
+*  **Installation des packages nécessaires :**  
+```{r}
+install.packages(c("dplyr", "ggplot2", "tidyverse", "Rtools", "caret", "SnowballC", "text", "MASS", "cluster"))
+```
+
+
+*  ** Chargement les bibliothèques nécessaires :**
+
+```{r}
+rm(list = ls())
+
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(tm)         # Pour le traitement de texte
+library(SnowballC)  # Pour le stemming
+#library(text)       # Pour le TF-IDF
+library(MASS)       # Pour l'analyse discriminante
+library(ggplot2)    # Pour la visualisation
+library(cluster)    # Pour le score de silhouette
+library(kableExtra)
+```
+
+
+*  **Étape 1 : Chargement et pré-traitement des données **
+
+*  **Charger les données :**
+
+
+```{r, echo = T}
+df_train <- read.csv("twitter_training.csv", stringsAsFactors = FALSE, header = TRUE)
+df_validation <- read.csv("twitter_validation.csv", stringsAsFactors = FALSE, header = TRUE)
+
+```
+
+*  **Renommer les colonnes :**
+
+```{r, echo = T}
+colnames(df_train) <- c("ID", "Category", "Sentiment", "Text")
+colnames(df_validation) <- c("ID", "Category", "Sentiment", "Text")
+
+```
+
+
+*  **Supprimer les lignes avec des valeurs manquantes dans la colonne "Text" :**
+
+```{r, echo = T}
+data_cleaned_train <- df_train %>%
+  filter(!is.na(Text))
+
+data_cleaned_validation <- df_validation %>%
+  filter(!is.na(Text))
+
+```
+
+
+*  **Nettoyer les tweets (supprimer les caractères spéciaux, URL et mots vides) :**
+
+```{r, echo = T}
+clean_text <- function(text) {
+  text <- tolower(text)                             # Convertir en minuscules
+  text <- str_replace_all(text, "http\\S+\\s*", "") # Supprimer les URL
+  text <- str_replace_all(text, "[^a-z\\s]", "")    # Supprimer les caractères spéciaux
+  text <- removeWords(text, stopwords("en"))        # Supprimer les mots vides
+  text <- wordStem(text, language = "en")           # Appliquer le stemming
+  return(text)
+}
+
+
+data_cleaned_train$Cleaned_Text <- sapply(data_cleaned_train$Text, clean_text)
+data_cleaned_validation$Cleaned_Text <- sapply(data_cleaned_validation$Text, clean_text)
+
+```
+
+*  **Affichage des données d'entrainement :**
+
+```{r, echo = T}
+data_cleaned_train%>% kbl(digits=3) %>%    
+       kable_styling(bootstrap_options = "striped", full_width = F, position = "center", latex_options = 'stripped') %>% 
+       scroll_box( height = "250px")
+  
+
+```
+
+*  **Échantillonnage des données :**
+
+```{r, echo = T}
+set.seed(42)  # Fixer un seed pour rendre l'échantillonnage reproductible
+sample_size <- 1000  # Taille réduite pour limiter les ressources nécessaires
+sample_indices <- sample(nrow(data_cleaned_train), size = sample_size)  # Sélectionner des indices aléatoires
+data_sample_train <- data_cleaned_train[sample_indices, ]
+
+```
+
+
+*  **Convertir les étiquettes de sentiment en format numérique :**
+
+```{r, echo = T}
+
+data_sample_train$Sentiment_Num <- as.numeric(as.factor(data_sample_train$Sentiment))
+
+
+```
+
+
+
+
+```{r, echo = T}
+# Création de la DTM
+cat("Étape : Création de la DTM\n")
+corpus <- Corpus(VectorSource(data_sample_train$Cleaned_Text))
+dtm <- DocumentTermMatrix(corpus, control = list(
+  weighting = weightTfIdf,
+  bounds = list(global = c(5, 0.8 * nrow(data_sample_train)))
+))
+
+
+```
+
+
+```{r, echo = T}
+# Réduction de la dimensionnalité
+cat("Étape : Réduction de la DTM\n")
+dtm <- removeSparseTerms(dtm, sparse = 0.995)  # Limiter les colonnes
+tfidf_matrix <- as.data.frame(as.matrix(dtm))
+tfidf_matrix$Sentiment <- data_sample_train$Sentiment
+
+
+```
+```{r, echo = T}
+# Réduction par ACP
+cat("Étape : Réduction par ACP\n")
+pca <- prcomp(tfidf_matrix[,-ncol(tfidf_matrix)], center = TRUE, scale. = TRUE)
+reduced_data <- as.data.frame(pca$x[, 1:20])  # Réduire à 20 composantes principales
+reduced_data$Sentiment <- tfidf_matrix$Sentiment
+
+
+```
+
+```{r, echo = T}
+# Analyse discriminante linéaire
+cat("Étape : Entraînement du modèle LDA\n")
+lda_model <- lda(Sentiment ~ ., data = reduced_data)
+lda_values <- predict(lda_model)
+
+```
+
+
+```{r, echo = T}
+# Visualisation
+ggplot(reduced_data, aes(x = lda_values$x[,1], y = lda_values$x[,2], color = Sentiment)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Analyse Factorielle Discriminante (LDA)",
+       x = "LD1", y = "LD2") +
+  theme_minimal()
+
+```
+
+
+
+*  **Étape 2 : Ingénierie des caractéristiques **
+
+*  **Calculer la matrice TF-IDF :**
+
+
+
+```{r, echo = T}
+corpus <- Corpus(VectorSource(data_sample_train$Cleaned_Text))
+#dtm <- DocumentTermMatrix(corpus, control = list(weighting = weightTfIdf))
+# Contrôler la construction de la DTM en limitant les termes
+dtm <- DocumentTermMatrix(corpus, control = list(
+  weighting = weightTfIdf,
+  bounds = list(global = c(5, 0.8 * nrow(corpus))) # Terme présent dans au moins 5 documents mais moins de 80% des documents
+))
+tfidf_matrix <- as.data.frame(as.matrix(dtm))
+
+```
+
+
+
+```{r, echo = T}
+
+# Réduire les dimensions (garder les 1000 termes les plus fréquents)
+dtm <- removeSparseTerms(dtm, sparse = 0.99)
+tfidf_matrix <- as.data.frame(as.matrix(dtm))
+tfidf_matrix$Sentiment <- data_sample_train$Sentiment
+
+```
+
+
+
+```{r, echo = T}
+#Réduction par PCA avant LDA
+pca <- prcomp(tfidf_matrix[,-ncol(tfidf_matrix)], center = TRUE, scale. = TRUE)
+reduced_data <- as.data.frame(pca$x[, 1:50])  # Garder les 50 premières composantes principales
+reduced_data$Sentiment <- tfidf_matrix$Sentiment
+
+```
+
+
+*  **Ajouter la variable cible :**
+
+```{r, echo = T}
+tfidf_matrix$Sentiment <- data_sample_train$Sentiment
+
+```
+
+
+*  **Étape 3 : Analyse factorielle discriminante **
+
+*  **Préparer les données pour l'AFD :**
+
+```{r, echo = T}
+model_data <- tfidf_matrix
+model_data$Sentiment <- as.factor(model_data$Sentiment)  # Transformer en facteur
+
+```
+
+
+*  **Appliquer une analyse discriminante linéaire (LDA) :**
+
+```{r, echo = T}
+lda_model <- lda(Sentiment ~ ., data = model_data)
+
+```
+
+
+*  **Projeter les données dans l'espace réduit :**
+
+```{r, echo = T}
+lda_values <- predict(lda_model)
+model_data$LD1 <- lda_values$x[,1]
+model_data$LD2 <- lda_values$x[,2]
+
+```
+
+*  **Étape 4 : Visualisation **
+
+
+```{r, echo = T}
+ggplot(model_data, aes(x = LD1, y = LD2, color = Sentiment)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Analyse Factorielle Discriminante (LDA)",
+       x = "LD1", y = "LD2") +
+  theme_minimal()
+
+```
+
+
+*  **Étape 5 : Évaluation du modèle :**
+
+*  **Calculer la précision si utilisé pour la classification :**
+
+
+```{r, echo = T}
+predictions <- lda_values$class
+accuracy <- mean(predictions == model_data$Sentiment)
+cat("Précision du modèle : ", accuracy, "\n")
+
+```
+
+
+
+*  **Calculer le score de silhouette pour évaluer la qualité de l'agrégation :**
+
+
+```{r, echo = T}
+silhouette_scores <- silhouette(as.numeric(predictions), dist(model_data[, c("LD1", "LD2")]))
+avg_silhouette_score <- mean(silhouette_scores[, 3])
+cat("Score de silhouette moyen : ", avg_silhouette_score, "\n")
+
+```
+
+
+
+
+
+
+
+
+
