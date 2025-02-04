@@ -1,0 +1,5 @@
+echo "projet/datasets.zip" >> .gitignore
+echo "projet/datasets/datasets/train_drcat_01.csv/train_drcat_01.csv" >> .gitignore
+echo "projet/datasets/datasets/train_drcat_02.csv/train_drcat_02.csv" >> .gitignore
+echo "projet/datasets/datasets/train_drcat_03.csv/train_drcat_03.csv" >> .gitignore
+echo "projet/datasets/datasets/train_drcat_04.csv/train_drcat_04.csv" >> .gitignore
