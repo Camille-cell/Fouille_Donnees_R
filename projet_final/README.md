@@ -1,7 +1,7 @@
+
 ---
-title: "Rapport sur la Détection de Texte Généré par l'IA"
-author: "FAHY CAMILLE - PESQUET AURELIA – ESIEE 2024-2025 -- E4 AP-4209"
-output: readme.md
+Rapport sur la Détection de Texte Généré par l'IA
+FAHY CAMILLE - PESQUET AURELIA – ESIEE 2024-2025 -- E4 AP-4209"
 ---
 
 # 1. Préambule
@@ -174,6 +174,7 @@ On applique la fonction compute_perplexity() à chaque texte de data_balanced$te
 L'Analyse Factorielle Discriminante (AFD) est utilisée pour réduire la dimensionnalité tout en maximisant la séparation entre les classes. Mathématiquement, l'AFD cherche à projeter les données dans un espace de dimensions inférieures où la variance inter-classe est maximisée tout en minimisant la variance intra-classe.
 
 Pour réaliser l'AFD, on échantilonne 1000 lignes du tableau, on supprime les colonnes inutiles telles que "text", "fold","source". On calcule la corrélation entre les variables pour supprimer les variables corrélées comme "word_count". On effectue ensuite la lda. 
+On va chercher à trouver les variables qui expliquent le mieux les données sur la première composante. 
 ```R
 data_balanced$perplexity <- sapply(data_balanced$text, compute_perplexity)
 ```
@@ -199,9 +200,24 @@ data_balanced_selected <- data_balanced_sample_cleaned[, c("label", "TTR","ai_wo
 
 # 5 Classification bayésienne
 
-La classification bayésienne repose sur le théorème de Bayes, qui permet de calculer la probabilité qu'un document appartienne à une classe donnée, étant donné les caractéristiques extraites. Nous avons utilisé un modèle Naive Bayes pour classifier les textes en fonction de leur probabilité d'être générés par l'homme ou l'IA.
+La classification bayésienne repose sur le théorème de Bayes, qui permet de calculer la probabilité qu'un document appartienne à une classe donnée, étant donné les caractéristiques extraites. Nous avons utilisé un modèle Naive Bayes pour classifier les textes en fonction de leur probabilité d'être générés par l'homme ou l'IA. Le théorème de Bayes et fait l'hypothèse "naïve" que les caractéristiques sont indépendantes les unes des autres. Il peut s'exprmier ainsi : 
+
+!["bayes"](images_data2/bayes.png)
+
+Naïve Bayes estime la probabilité de chaque classe en fonction des caractéristiques observées. Il calcule la probabilité de chaque classe donnée un ensemble de caractéristiques et choisit la classe avec la probabilité la plus élevée comme prédiction finale.
 
 Afin mettre en œuvre une stratégie de validation robuste, on met en place la validation croisée stratifiée k-fold, pour garantir la généralisabilité du modèle.
+
+La validation croisée stratifiée k-fold est une technique de validation robuste qui permet de réduire les biais d'évaluation, particulièrement utile dans des jeux de données déséquilibrés. Voici comment elle fonctionne :
+
+Le jeu de données est divisé en k sous-ensembles ou "folds". Chaque fold est utilisé à tour de rôle comme ensemble de test, tandis que les autres sont utilisés pour entraîner le modèle.
+
+La stratification garantit que chaque fold contient une proportion similaire de chaque classe (dans ce cas, "AI" et "Human"). Cela permet d'éviter une distribution déséquilibrée des classes, ce qui pourrait influencer négativement les performances du modèle.
+
+La validation croisée réduit le risque de surajustement et assure que le modèle généralise bien à différents sous-ensembles de données. Elle est particulièrement utile lorsque le jeu de données est limité, car elle permet d'utiliser tous les exemples pour à la fois l'entraînement et la validation.
+
+L'optimisation du modèle utilise la métrique ROC (et sa surface sous la courbe, AUC), qui est très utile pour évaluer la performance des modèles de classification binaire. Un AUC proche de 1.0 signifie un modèle très performant pour séparer les deux classes, tandis qu'un AUC proche de 0.5 indique que le modèle n'a pas de meilleure performance que le hasard.
+
 ```R
 # Configuration de la validation croisée stratifiée k-fold
 set.seed(123)
@@ -241,16 +257,23 @@ Pour observer les résultats, on affiche la matrice de confusion, la courbe ROC,
 
 !["confusion_matrix](images_data2/concf_matrix.png)
 
-L'accuracy indique que le modèle est corecte dans 63% des cas. La sensitivity indique que le modèle détecte correctement environ 86.78 % des cas positifs (texte écris par un humain).
-La spécifitité indique modèle détecte correctement environ 50.95%  des cas négatifs (texte écrit par un llm).
+L'accuracy indique que le modèle est corecte dans 63% des cas. 
+
+La sensitivity indique que le modèle détecte correctement environ 86.78 % des cas positifs (texte écris par un humain).
+
+La spécifitité indique modèle détecte correctement environ 50.95%  des cas négatifs (texte écrit par un llm). Il y a probablement beaucoup de faux positifs (des textes IA mal classés comme étant écrits par un humain).
+
 Le Kappa (0.3075) indique un accord faible entre les prédictions et la réalité au-delà du simple hasard.
 
 AUC (Test Set): 0.7657952
-L'AUC est correcte.
+L'AUC représente la capacité du modèle à différencier les classes (humain vs IA). Une AUC de 0.7658 est relativement bonne. Cela signifie que le modèle a une capacité raisonnable à séparer les textes écrits par des humains de ceux écrits par l'IA.
 
 Brier Score (Test Set): 0.3370932
+Le Brier score mesure l'erreur quadratique moyenne entre les probabilités prédites et les résultats réels. Un score plus bas indique de meilleures performances. Ici, un Brier score de 0.337 indique que le modèle pourrait être amélioré dans sa calibration, notamment dans la confiance qu'il accorde à ses prédictions.
 
-"F1-score:  0.6026"
+"F1-score:  0.6026" 
+
+Le F1-score est la moyenne harmonique entre la précision (prédictions correctes parmi les textes classés comme humains ou IA) et le rappel (détection des vrais positifs ou vrais négatifs). Avec un F1-score de 0.6026, le modèle a des performances modérées, indiquant un équilibre raisonnable entre la précision et le rappel, mais il pourrait encore être amélioré, notamment pour mieux capturer à la fois les cas humains et IA sans trop de faux positifs ou négatifs.
 
 # 7 Conclusion
 
