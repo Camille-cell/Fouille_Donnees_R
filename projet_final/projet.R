@@ -18,13 +18,13 @@ library(e1071)
 library(caret)
 library(pROC)
 library(ROSE)
+library(text2vec)
+
 #Chargement des données
 data<-read.csv("C:/Users/mimia/Fouille_de_donnees_avec_R/projet_final/datasets/train_drcat_04.csv")
 
 #Analyse exploratoire
 head(data)
-
-str(data)
 
 # Résumé statistique des variables
 summary(data)
@@ -34,6 +34,13 @@ summary(data)
 # Vérifier les valeurs manquantes
 colSums(is.na(data))
 
+# Séparer les données en jeu d'entraînement (70%) et jeu de test (30%)
+set.seed(123)  # Pour la reproductibilité
+train_index <- createDataPartition(data$label, p = 0.7, list = FALSE)
+
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+
 #Distribution des classes
 ggplot(data, aes(x = as.factor(label))) +
   geom_bar(fill = "steelblue") +
@@ -42,8 +49,8 @@ ggplot(data, aes(x = as.factor(label))) +
 
 #Réquilibrage des classes
 # Séparation des classes
-data_balanced_human <- data %>% filter(label == 0)
-data_balanced_ai <- data %>% filter(label == 1)
+data_balanced_human <- train_data %>% filter(label == 0)
+data_balanced_ai <- train_data %>% filter(label == 1)
 
 # Sous-échantillonnage de la classe majoritaire
 set.seed(123)  # Assurez la reproductibilité
@@ -148,6 +155,23 @@ bigram_model <- dfm(tokens(text_corpus), ngrams = 2)
 
 
 
+# Fonction pour calculer la perplexité sur les bigrammes
+compute_perplexity <- function(texts) {
+  vocabulary <- create_vocabulary(itoken(texts, progressbar = FALSE))
+  vectorizer <- vocab_vectorizer(vocabulary)
+  dtm <- create_dtm(itoken(texts), vectorizer)
+  
+  term_prob <- colSums(dtm) / sum(dtm)
+  perplexity <- exp(-mean(log(term_prob[term_prob > 0])))
+  return(perplexity)
+}
+
+data_balanced$perplexity <- sapply(data_balanced$text, compute_perplexity)
+
+
+
+
+
 
 
 #Etude de la variabilité de la longueur des phrases
@@ -169,7 +193,7 @@ ggplot(data_balanced, aes(x = avg_sentence_length, fill = as.factor(label))) +
 
 #score de lisibilité
 # Calcul des scores de lisibilité
-readability_scores <- textstat_readability(data_balanced$text, measure = "Flesch.Kincaid")
+readability_scores <-  textstat_readability(data_balanced$text, measure = "Flesch.Kincaid")
 data_balanced$readability <- readability_scores$Flesch.Kincaid  # Extraction correcte
 # Comparaison entre les classes
 ggplot(data_balanced, aes(x = readability, fill = as.factor(label))) +
@@ -197,37 +221,37 @@ ggplot(data_balanced, aes(x = TTR, fill = as.factor(label))) +
 # Charger les stopwords en anglais
 library(stopwords)
 
-# 1. Séparation des textes par classe
+# Séparation des textes par classe
 text_human <- data_balanced %>% filter(label == 0) %>% pull(text)
 text_ai <- data_balanced %>% filter(label == 1) %>% pull(text)
 
-# 2. Fonction pour tokeniser et compter les mots après suppression des stopwords
+# Fonction pour tokeniser et compter les mots après suppression des stopwords
 clean_and_count_words <- function(text_vector) {
   words <- unlist(strsplit(tolower(paste(text_vector, collapse = " ")), "\\W+"))  # Tokenisation
   words <- words[!(words %in% stopwords("en"))]  # Suppression des stopwords
   return(data.frame(table(words)))  # Fréquence des mots restants
 }
 
-# 3. Extraction des mots fréquents après suppression des stopwords
+# Extraction des mots fréquents après suppression des stopwords
 word_counts_human <- clean_and_count_words(text_human)
 word_counts_ai <- clean_and_count_words(text_ai)
 
-# 4. Sélectionner les mots les plus fréquents
+# Sélectionner les mots les plus fréquents
 top_words_human <- word_counts_human %>% arrange(desc(Freq)) %>% head(50) %>% pull(words)
 top_words_ai <- word_counts_ai %>% arrange(desc(Freq)) %>% head(50) %>% pull(words)
 
-# 5. Fonction pour compter l'apparition des mots caractéristiques dans chaque texte
+# Fonction pour compter l'apparition des mots caractéristiques dans chaque texte
 count_word_occurrences <- function(text, word_list) {
   words <- unlist(strsplit(tolower(text), "\\W+"))
   words <- words[!(words %in% stopwords("en"))]  # Supprimer stopwords ici aussi
   return(sum(words %in% word_list))
 }
 
-# 6. Appliquer cette fonction pour chaque texte
+# Appliquer cette fonction pour chaque texte
 data_balanced$human_word_count <- sapply(data_balanced$text, count_word_occurrences, word_list = top_words_human)
 data_balanced$ai_word_count <- sapply(data_balanced$text, count_word_occurrences, word_list = top_words_ai)
 
-# 7. Visualisation de la distribution des nouvelles features
+# Visualisation de la distribution des nouvelles features
 ggplot(data_balanced, aes(x = human_word_count, fill = as.factor(label))) +
   geom_density(alpha = 0.5) +
   labs(title = "Distribution des mots caractéristiques humains", x = "Nombre de mots humains", y = "Densité") +
@@ -259,7 +283,7 @@ set.seed(123)
 data_balanced_sample <- data_balanced[sample(nrow(data_balanced), 1000), ]  # Échantillon de 1000 lignes
 str(data_balanced_sample)
 # Suppression des colonnes non pertinentes en Base R
-data_balanced_sample_cleaned <- data_balanced_sample[, setdiff(names(data_balanced_sample), c("text", "source", "fold", "perplexity" ))]
+data_balanced_sample_cleaned <- data_balanced_sample[, setdiff(names(data_balanced_sample), c("text", "source", "fold"))]
 str(data_balanced_sample_cleaned)
 # Convertir label en facteur
 data_balanced_sample_cleaned$label <- as.factor(data_balanced_sample_cleaned$label)
@@ -290,12 +314,13 @@ print(cor_matrix)
 
 # Supprimer la colonne "word_count" en Base R
 data_balanced_sample_cleaned <- data_balanced_sample_cleaned[, !names(data_balanced_sample_cleaned) %in% "word_count"]
+colnames(data_balanced_sample_cleaned)
 
 # Appliquer LDA
 lda_model <- lda(label ~ ., data = data_balanced_sample_cleaned)
 
 # Résumé du modèle
-head(lda_model)
+lda_model
 
 # Visualiser la projection LDA
 lda_projection <- predict(lda_model)$x
@@ -315,39 +340,57 @@ ggplot(lda_df, aes(x = LD1, color = label)) +
 
 
 colnames(data_balanced_sample_cleaned)
-# Sélectionner uniquement les colonnes pertinentes : TTR et label, ai_word_count, human_word_count
-data_balanced_selected <- data_balanced_sample_cleaned[, c("label", "TTR", "human_word_count","ai_word_count")]
+# Sélectionner uniquement les colonnes pertinentes : TTR et label
+data_balanced_selected <- data_balanced_sample_cleaned[, c("label", "TTR","ai_word_count","perplexity","sentence_count")]
 str(data_balanced_selected)
 # Convertir la variable label en facteur (si ce n'est pas déjà fait)
 data_balanced_selected$label <- as.factor(data_balanced_selected$label)
 ####
+# Configuration de la validation croisée stratifiée k-fold
+set.seed(123)
+train_control <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
 
+# Correction explicite pour caret (labels AI vs Human)
+data_balanced_selected$label <- as.factor(ifelse(data_balanced_selected$label == 1, "AI", "Human"))
 
-# Séparer les données en jeu d'entraînement (70%) et jeu de test (30%)
-set.seed(123)  # Pour la reproductibilité
-train_index <- createDataPartition(data_balanced_selected$label, p = 0.7, list = FALSE)
+# Entraînement du modèle Naïve Bayes avec validation croisée
+nb_model_cv <- train(
+  label ~ ., 
+  data = data_balanced_selected,
+  method = "naive_bayes",
+  trControl = train_control,
+  metric = "ROC"
+)
 
-train_data <- data_balanced_selected[train_index, ]
-test_data <- data_balanced_selected[-train_index, ]
+# Résumé du modèle après validation croisée
+print(nb_model_cv)
 
-# Entraîner le modèle Naïve Bayes sur le jeu d'entraînement
-naive_bayes_model <- naiveBayes(label ~ ., data = train_data)
+test_data$TTR <- sapply(strsplit(test_data$text, " "), function(words) length(unique(words)) / length(words))
+test_data$ai_word_count <- sapply(test_data$text, count_word_occurrences, word_list = top_words_ai)
+test_data$perplexity <- sapply(test_data$text, compute_perplexity)
+test_data$sentence_count <- str_count(test_data$text, "[.!?]")  # Nombre de phrases
+# Appliquer le modèle sur le jeu de test
+test_data$label <- as.factor(ifelse(test_data$label == 1, "AI", "Human"))
 
-# Prédictions sur le jeu de test
-test_predictions <- predict(naive_bayes_model, newdata = test_data)
+test_predictions <- predict(nb_model_cv, newdata = test_data)
+test_probabilities <- predict(nb_model_cv, newdata = test_data, type = "prob")
 
-# Matrice de confusion pour le jeu de test
+# Matrice de confusion
 conf_matrix_test <- confusionMatrix(test_predictions, test_data$label)
 print(conf_matrix_test)
 
-# Courbe ROC sur le jeu de test
-test_probabilities <- predict(naive_bayes_model, newdata = test_data, type = "raw")
-roc_curve_test <- roc(test_data$label, test_probabilities[, 2])
+# Courbe ROC
+roc_curve_test <- roc(test_data$label, test_probabilities[, "AI"])
 plot(roc_curve_test, main = "Courbe ROC (Test Set)", col = "darkgreen")
 
-# Calcul des métriques sur le jeu de test
+# Calcul de l'AUC
 auc_test <- auc(roc_curve_test)
-brier_score_test <- mean((test_probabilities[, 2] - (test_data$label == 1))^2)
-
 cat("\nAUC (Test Set):", auc_test)
+brier_score_test <- mean((test_probabilities[, 2] - (test_data$label == 1))^2)
 cat("\nBrier Score (Test Set):", brier_score_test)
+
