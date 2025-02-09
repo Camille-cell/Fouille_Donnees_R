@@ -1,24 +1,23 @@
 #effacer toutes les variables en mémoire
 rm(list=ls())
-install.packages(c("dplyr", "ggplot2", "tidytext", "stringr", "tidyr","stopwords","tm","textstem", "tidyverse"))
-install.packages("SnowballC")
-install.packages("naivebayes")
+
 # Charger le package SnowballC
-library(SnowballC)
-#permet de réaliser des “beaux” tableaux au format html ou pdf.
-library(kableExtra)
-library(dplyr)
-library(ggplot2)
-library(tidytext)
-library(stringr)
-library(tidyr)
-library(stopwords)
-library(tm)  
-library(textstem)
-library(e1071)
-library(caret)  # Pour diviser les données et évaluer le modèle
-library(stats)
-data<-read.csv("G:/Mon Drive/E4/Fouille_de_donnees_avec_R/project1/archive (1)/Emotion_classify_Data.csv")
+# Charger les librairies nécessaires
+library(SnowballC)       # Pour effectuer le stemming (réduction des mots à leur racine)
+library(kableExtra)      # Pour créer des tableaux stylés dans les rapports (markdown/HTML)
+library(dplyr)           # Pour manipuler les données (filtrage, regroupement, transformations)
+library(ggplot2)         # Pour créer des visualisations graphiques
+library(tidytext)        # Pour analyser les données textuelles (tokenization, etc.)
+library(stringr)         # Pour manipuler les chaînes de caractères
+library(tidyr)           # Pour transformer et organiser les données (pivot, unnest, etc.)
+library(stopwords)       # Pour gérer les listes de mots vides (stop words)
+library(tm)              # Pour effectuer des tâches de text mining (corpus, preprocessing, etc.)
+library(textstem)        # Pour effectuer le lemmatization (réduction des mots à leur forme de base)
+library(e1071)           # Pour les algorithmes de machine learning (SVM, naïve Bayes, etc.)
+library(caret)           # Pour diviser les données en train/test et évaluer les modèles
+library(stats)           # Pour les statistiques classiques et les tests (ex: tests d'hypothèse)
+
+data<-read.csv("archive (1)/Emotion_classify_Data.csv")
 # Affichage des premières lignes sous forme de tableau HTML
 data %>%
   kbl(digits = 3) %>%
@@ -75,7 +74,7 @@ head(data$cleaned_comment)
 
 #suppression des mots vides
 # Charger les mots vides en anglais
-stop_words_list <-  c(stopwords("en"), "not", "can", "will")
+stop_words_list <-  c(stopwords("en"), "not", "can", "will", "actual", "ago","also", "around","back")
 print(stop_words_list)
 
 # Tokeniser le texte en mots individuels et supprimer les mots vides
@@ -85,7 +84,7 @@ cleaned_data <- data %>%
   filter(!word %in% stop_words_list) # Supprimer les mots vides
 
 
-# Optionnel : Reconstruire les commentaires nettoyés
+# Reconstruire les commentaires nettoyés
 cleaned_comments <- cleaned_data %>%
   group_by(doc_id) %>%
   summarise(cleaned_comment = paste(word, collapse = " ")) %>%
@@ -99,26 +98,25 @@ data <- data %>%
   left_join(cleaned_comments, by = "doc_id")
 
 # Afficher un échantillon des commentaires nettoyés
-head(data$cleaned_comments)
+head(data$cleaned_comment.y)
 
 # Préparation des données
 preprocessed_data <- data %>%
   select(-Comment, -comment_length, -cleaned_comment.x)
-
+print(preprocessed_data)
 # Tokenisation
 tokenized_data <- preprocessed_data %>%
   unnest_tokens(word, cleaned_comment.y)
+print(tokenized_data)
 
-# Appliquer le stemming
-tokenized_data <- tokenized_data %>%
-  mutate(word = wordStem(word, language = "en"))
 # Calcul des fréquences des mots
 word_counts <- tokenized_data %>%
   count(word)
 print(word_counts)
 # Filtrer les mots en fonction de leur fréquence
 filtered_words <- word_counts %>%
-  filter(n > 0.01 * nrow(tokenized_data) & n < 0.9 * nrow(tokenized_data))
+  filter(n > 0.0005 * nrow(tokenized_data) & n < 0.9 * nrow(tokenized_data))
+print(filtered_words)
 # Filtrer les données tokenisées pour ne garder que les mots les plus fréquents
 tokenized_data <- tokenized_data %>%
   filter(word %in% filtered_words$word)
@@ -133,18 +131,18 @@ tf_idf_data <- tokenized_data %>%
 # Trier par score TF-IDF décroissant
 tf_idf_data <- tf_idf_data %>%
   arrange(desc(tf_idf))
-
+print(tf_idf_data)
 # Garder les 5000 mots avec les meilleurs scores TF-IDF
 top_5000_words <- tf_idf_data %>%
   group_by(word) %>%
   summarise(max_tf_idf = max(tf_idf)) %>%
   arrange(desc(max_tf_idf)) %>%
-  top_n(5000, max_tf_idf)
+  top_n(10000, max_tf_idf)
 
 # Filtrer les données TF-IDF pour ne garder que les 1000 mots
 tf_idf_data_filtered <- tf_idf_data %>%
   filter(word %in% top_5000_words$word)
-
+print(tf_idf_data_filtered)
 # Créer la matrice TF-IDF
 tf_idf_matrix <- tf_idf_data_filtered %>%
   pivot_wider(
@@ -163,7 +161,7 @@ tf_idf_matrix <- tf_idf_matrix %>%
 
 # Diviser les données en train (80%) et test (20%)
 set.seed(123)  # Pour reproductibilité
-split <- createDataPartition(tf_idf_matrix$Emotion, p = 0.8, list = FALSE)
+split <- createDataPartition(tf_idf_matrix$Emotion, p = 0.7, list = FALSE)
 train_data <- tf_idf_matrix[split, ]
 test_data <- tf_idf_matrix[-split, ]
 
@@ -197,6 +195,17 @@ conf_matrix <- confusionMatrix(test_predictions, test_data_model$Emotion)
 # Afficher la matrice de confusion
 print(conf_matrix)
 
+# Calcul des F1 scores pour chaque classe
+precision <- conf_matrix$byClass[, "Pos Pred Value"]
+recall <- conf_matrix$byClass[, "Sensitivity"]
+
+# Calcul du F1 score pour chaque classe
+f1_scores <- 2 * (precision * recall) / (precision + recall)
+
+# Affichage des F1 scores pour chaque classe
+f1_scores
+
+
 # Calcul de la précision globale
 accuracy <- conf_matrix$overall['Accuracy']
 cat("Précision globale :", accuracy, "\n")
@@ -208,3 +217,4 @@ ggplot(as.data.frame(conf_matrix$table), aes(Reference, Prediction, fill = Freq)
   scale_fill_gradient(low = "white", high = "blue") +
   labs(title = "Matrice de Confusion", x = "Vraies Étiquettes", y = "Prédictions") +
   theme_minimal()
+
